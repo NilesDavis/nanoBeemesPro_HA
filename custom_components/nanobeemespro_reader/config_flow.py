@@ -30,7 +30,18 @@ async def _test_connection(hass: HomeAssistant, host: str) -> str | None:
     return None
 
 
-class BsedLesekopfConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+def _host_schema(default_host: str = "", default_interval: int = DEFAULT_SCAN_INTERVAL):
+    return vol.Schema(
+        {
+            vol.Required(CONF_HOST, default=default_host): str,
+            vol.Optional(CONF_SCAN_INTERVAL, default=default_interval): vol.All(
+                int, vol.Range(min=2, max=60)
+            ),
+        }
+    )
+
+
+class NanoBeemesPROConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle the config flow for nanoBeemesPro Reader."""
 
     VERSION = 1
@@ -42,7 +53,6 @@ class BsedLesekopfConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             host = user_input[CONF_HOST].strip().rstrip("/")
             scan_interval = user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
 
-            # Prevent duplicate entries for the same host
             await self.async_set_unique_id(host)
             self._abort_if_unique_id_configured()
 
@@ -60,13 +70,48 @@ class BsedLesekopfConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_HOST, default="10.0.3.90"): str,
-                    vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
-                        int, vol.Range(min=2, max=60)
-                    ),
-                }
-            ),
+            data_schema=_host_schema(),
+            errors=errors,
+        )
+
+    @staticmethod
+    def async_get_options_flow(config_entry):
+        return NanoBeemesPROOptionsFlow(config_entry)
+
+
+class NanoBeemesPROOptionsFlow(config_entries.OptionsFlow):
+    """Handle options (re-configure) for nanoBeemesPro Reader."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        self._config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        errors = {}
+
+        current_host = self._config_entry.data[CONF_HOST]
+        current_interval = self._config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+
+        if user_input is not None:
+            host = user_input[CONF_HOST].strip().rstrip("/")
+            scan_interval = user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+
+            error = await _test_connection(self.hass, host)
+            if error:
+                errors["base"] = error
+            else:
+                # Update both data and title
+                self.hass.config_entries.async_update_entry(
+                    self._config_entry,
+                    title=f"nanoBeemesPro Reader ({host})",
+                    data={
+                        CONF_HOST: host,
+                        CONF_SCAN_INTERVAL: scan_interval,
+                    },
+                )
+                return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=_host_schema(current_host, current_interval),
             errors=errors,
         )

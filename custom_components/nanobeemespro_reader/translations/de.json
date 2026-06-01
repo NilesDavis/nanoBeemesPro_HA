@@ -4,7 +4,7 @@
       "user": {
         "title": "nanoBeemesPro Reader einrichten",
         "data": {
-          "host": "IP-Adresse des Lesekopfs",
+          "host": "IP-Adresse oder Hostname des Lesekopfs",
           "scan_interval": "Abfrageintervall (Sekunden)"
         }
       }
@@ -15,6 +15,21 @@
     },
     "abort": {
       "already_configured": "Lesekopf ist bereits eingerichtet"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "nanoBeemesPro Reader konfigurieren",
+        "data": {
+          "host": "IP-Adresse oder Hostname des Lesekopfs",
+          "scan_interval": "Abfrageintervall (Sekunden)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum Lesekopf fehlgeschlagen",
+      "invalid_response": "Ungültige Antwort vom Lesekopf"
     }
   }
 }
