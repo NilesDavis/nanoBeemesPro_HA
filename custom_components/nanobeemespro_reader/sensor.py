@@ -55,8 +55,12 @@ class BsedSensor(CoordinatorEntity, SensorEntity):
         self._entry = entry
         host = entry.data[CONF_HOST]
 
-        self._attr_unique_id = f"{host}_{obis_key}"
-        self._attr_name = meta["name"]
+        # Entity ID based on OBIS code (e.g., "1.8.0" → "1_8_0")
+        obis_id = obis_key.replace(".", "_")
+        self._attr_unique_id = f"{host}_{obis_id}"
+        
+        # Friendly name from OBIS_SENSORS metadata
+        self._attr_name = f"{obis_key} - {meta['name']}"
         self._attr_native_unit_of_measurement = meta["unit"]
         self._attr_icon = meta["icon"]
 
