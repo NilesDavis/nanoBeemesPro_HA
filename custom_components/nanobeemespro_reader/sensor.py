@@ -1,152 +1,130 @@
-"""DataUpdateCoordinator for nanoBeemesPro Reader."""
+"""Sensor platform for nanoBeemesPro Reader."""
 from __future__ import annotations
 
-import asyncio
 import logging
-from datetime import timedelta
 
-import aiohttp
-
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, EMETER_ENDPOINT, ENERGY_OBIS_CODES
+from .const import DOMAIN, OBIS_SENSORS
+from .coordinator import BsedLesekopfCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-# Backoff settings
-_BACKOFF_INITIAL = 10       # seconds after first failure
-_BACKOFF_MAX = 300          # cap at 5 minutes
-_BACKOFF_MULTIPLIER = 2
 
-CONF_POWER_FACTOR = "power_factor"
-CONF_INVERT_POWER = "invert_power"
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up sensors from a config entry."""
+    coordinator: BsedLesekopfCoordinator = hass.data[DOMAIN][entry.entry_id]
+
+    entities = []
+    for obis_key, meta in OBIS_SENSORS.items():
+        entities.append(BsedSensor(coordinator, entry, obis_key, meta))
+
+    # Always add Zählernummer as a diagnostic sensor
+    entities.append(BsedZaehlerSensor(coordinator, entry))
+
+    async_add_entities(entities)
 
 
-class BsedLesekopfCoordinator(DataUpdateCoordinator):
-    """Fetches data from the BSED nanoBeemesPro emeter.json endpoint."""
+class BsedSensor(CoordinatorEntity, SensorEntity):
+    """A numeric sensor reading from emeter.json."""
 
     def __init__(
         self,
-        hass: HomeAssistant,
-        host: str,
-        scan_interval: int,
-        power_factor: float = 1.0,
-        invert_power: bool = False,
+        coordinator: BsedLesekopfCoordinator,
+        entry: ConfigEntry,
+        obis_key: str,
+        meta: dict,
     ) -> None:
-        self.host = host
-        self.url = f"http://{host}{EMETER_ENDPOINT}"
-        self._session = aiohttp.ClientSession()
-        self._scan_interval = scan_interval
-        self._power_factor = power_factor
-        self._invert_power = invert_power
-        self._consecutive_failures = 0
-        self._device_was_available = True  # tracks last known state for logging
+        super().__init__(coordinator)
+        self._obis_key = obis_key
+        self._meta = meta
+        self._entry = entry
+        host = entry.data[CONF_HOST]
 
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(seconds=scan_interval),
+        # Entity ID based on OBIS code (e.g., "1.8.0" → "1_8_0")
+        obis_id = obis_key.replace(".", "_")
+        self._attr_unique_id = f"{host}_{obis_id}"
+        
+        # Friendly name from OBIS_SENSORS metadata
+        self._attr_name = f"{obis_key} - {meta['name']}"
+        self._attr_native_unit_of_measurement = meta["unit"]
+        self._attr_icon = meta["icon"]
+
+        dc = meta.get("device_class")
+        self._attr_device_class = SensorDeviceClass(dc) if dc else None
+
+        sc = meta.get("state_class")
+        self._attr_state_class = SensorStateClass(sc) if sc else None
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, host)},
+            name=f"nanoBeemesPro Reader ({host})",
+            manufacturer="BSED GmbH",
+            model="nanoBeemesPro",
+            configuration_url=f"http://{host}",
         )
 
-    async def _async_update_data(self) -> dict[str, str]:
-        """Fetch and parse emeter.json. Returns dict: descr -> value."""
+    @property
+    def native_value(self):
+        """Return the current sensor value."""
+        if self.coordinator.data is None:
+            return None
+        raw = self.coordinator.data.get(self._obis_key)
+        if raw is None:
+            return None
         try:
-            async with self._session.get(
-                self.url, timeout=aiohttp.ClientTimeout(total=5)
-            ) as resp:
-                if resp.status != 200:
-                    raise UpdateFailed(f"HTTP {resp.status} from {self.url}")
-                raw = await resp.json(content_type=None)
-        except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-            self._handle_failure(err)
-            raise UpdateFailed(str(err)) from err
+            return float(raw)
+        except (ValueError, TypeError):
+            _LOGGER.warning("Cannot convert '%s' to float for %s", raw, self._obis_key)
+            return None
 
-        if "eminfo" not in raw:
-            self._handle_failure("'eminfo' key missing in response")
-            raise UpdateFailed("Unexpected response: 'eminfo' key missing")
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self.coordinator.data is not None
 
-        # Successful fetch — reset failure state
-        self._on_success()
 
-        # Parse array of {descr, value} into a flat dict with transformations
-        parsed: dict[str, str] = {}
-        for entry in raw["eminfo"]:
-            descr = entry.get("descr", "")
-            value = entry.get("value", "")
-            
-            # Apply power_factor to energy OBIS codes
-            if descr in ENERGY_OBIS_CODES:
-                try:
-                    numeric_value = float(value)
-                    numeric_value *= self._power_factor
-                    value = str(numeric_value)
-                except (ValueError, TypeError):
-                    pass
-            
-            # Apply invert_power to 16.7.0 (current power)
-            if descr == "16.7.0" and self._invert_power:
-                try:
-                    numeric_value = float(value)
-                    numeric_value *= -1
-                    value = str(numeric_value)
-                except (ValueError, TypeError):
-                    pass
-            
-            parsed[descr] = value
+class BsedZaehlerSensor(CoordinatorEntity, SensorEntity):
+    """Diagnostic sensor: Zählernummer."""
 
-        parsed["__emstatus"] = str(raw.get("emstatus", ""))
-        parsed["__pinstatus"] = str(raw.get("pinstatus", ""))
-
-        _LOGGER.debug("Fetched emeter data: %s", parsed)
-        return parsed
-
-    def _handle_failure(self, reason: object) -> None:
-        """Track consecutive failures, log on first occurrence, apply backoff."""
-        self._consecutive_failures += 1
-
-        if self._device_was_available:
-            _LOGGER.warning(
-                "nanoBeemesPro at %s is unavailable: %s. "
-                "Will retry with exponential backoff.",
-                self.host,
-                reason,
-            )
-            self._device_was_available = False
-
-        # Calculate backoff interval, capped at _BACKOFF_MAX
-        backoff = min(
-            _BACKOFF_INITIAL * (_BACKOFF_MULTIPLIER ** (self._consecutive_failures - 1)),
-            _BACKOFF_MAX,
+    def __init__(self, coordinator: BsedLesekopfCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        host = entry.data[CONF_HOST]
+        self._attr_unique_id = f"{host}_zaehler_nr"
+        self._attr_name = "Zählernummer"
+        self._attr_icon = "mdi:counter"
+        self._attr_entity_registry_enabled_default = True
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, host)},
+            name=f"nanoBeemesPro Reader ({host})",
+            manufacturer="BSED GmbH",
+            model="nanoBeemesPro",
+            configuration_url=f"http://{host}",
         )
-        new_interval = timedelta(seconds=backoff)
 
-        if self.update_interval != new_interval:
-            _LOGGER.debug(
-                "Backoff: next retry in %s seconds (failure #%d)",
-                backoff,
-                self._consecutive_failures,
-            )
-            self.update_interval = new_interval
+    @property
+    def native_value(self):
+        if self.coordinator.data is None:
+            return None
+        # The descr for Zählernummer contains HTML entity &auml; → match by value pattern
+        for descr, value in self.coordinator.data.items():
+            if "Nr" in descr or "nr" in descr:
+                return value
+        return None
 
-    def _on_success(self) -> None:
-        """Reset failure tracking and restore normal poll interval."""
-        if not self._device_was_available:
-            _LOGGER.info(
-                "nanoBeemesPro at %s is available again after %d failure(s).",
-                self.host,
-                self._consecutive_failures,
-            )
-
-        self._consecutive_failures = 0
-        self._device_was_available = True
-
-        normal_interval = timedelta(seconds=self._scan_interval)
-        if self.update_interval != normal_interval:
-            self.update_interval = normal_interval
-
-    async def async_close(self) -> None:
-        """Close the aiohttp session."""
-        await self._session.close()
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self.coordinator.data is not None
