@@ -9,7 +9,16 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, DEFAULT_SCAN_INTERVAL, EMETER_ENDPOINT
+from .const import (
+    DOMAIN,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_POWER_FACTOR,
+    DEFAULT_INVERT_POWER,
+    EMETER_ENDPOINT,
+)
+
+CONF_POWER_FACTOR = "power_factor"
+CONF_INVERT_POWER = "invert_power"
 
 
 async def _test_connection(hass: HomeAssistant, host: str) -> str | None:
@@ -30,13 +39,22 @@ async def _test_connection(hass: HomeAssistant, host: str) -> str | None:
     return None
 
 
-def _host_schema(default_host: str = "", default_interval: int = DEFAULT_SCAN_INTERVAL):
+def _host_schema(
+    default_host: str = "",
+    default_interval: int = DEFAULT_SCAN_INTERVAL,
+    default_power_factor: float = DEFAULT_POWER_FACTOR,
+    default_invert_power: bool = DEFAULT_INVERT_POWER,
+):
     return vol.Schema(
         {
             vol.Required(CONF_HOST, default=default_host): str,
             vol.Optional(CONF_SCAN_INTERVAL, default=default_interval): vol.All(
                 int, vol.Range(min=2, max=60)
             ),
+            vol.Optional(CONF_POWER_FACTOR, default=default_power_factor): vol.All(
+                float, vol.Range(min=0.1, max=100)
+            ),
+            vol.Optional(CONF_INVERT_POWER, default=default_invert_power): bool,
         }
     )
 
@@ -52,6 +70,8 @@ class NanoBeemesPROConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             host = user_input[CONF_HOST].strip().rstrip("/")
             scan_interval = user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+            power_factor = user_input.get(CONF_POWER_FACTOR, DEFAULT_POWER_FACTOR)
+            invert_power = user_input.get(CONF_INVERT_POWER, DEFAULT_INVERT_POWER)
 
             await self.async_set_unique_id(host)
             self._abort_if_unique_id_configured()
@@ -65,6 +85,8 @@ class NanoBeemesPROConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     data={
                         CONF_HOST: host,
                         CONF_SCAN_INTERVAL: scan_interval,
+                        CONF_POWER_FACTOR: power_factor,
+                        CONF_INVERT_POWER: invert_power,
                     },
                 )
 
@@ -89,11 +111,21 @@ class NanoBeemesPROOptionsFlow(config_entries.OptionsFlow):
         errors = {}
 
         current_host = self._config_entry.data[CONF_HOST]
-        current_interval = self._config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        current_interval = self._config_entry.data.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )
+        current_power_factor = self._config_entry.data.get(
+            CONF_POWER_FACTOR, DEFAULT_POWER_FACTOR
+        )
+        current_invert_power = self._config_entry.data.get(
+            CONF_INVERT_POWER, DEFAULT_INVERT_POWER
+        )
 
         if user_input is not None:
             host = user_input[CONF_HOST].strip().rstrip("/")
             scan_interval = user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+            power_factor = user_input.get(CONF_POWER_FACTOR, DEFAULT_POWER_FACTOR)
+            invert_power = user_input.get(CONF_INVERT_POWER, DEFAULT_INVERT_POWER)
 
             error = await _test_connection(self.hass, host)
             if error:
@@ -106,12 +138,16 @@ class NanoBeemesPROOptionsFlow(config_entries.OptionsFlow):
                     data={
                         CONF_HOST: host,
                         CONF_SCAN_INTERVAL: scan_interval,
+                        CONF_POWER_FACTOR: power_factor,
+                        CONF_INVERT_POWER: invert_power,
                     },
                 )
                 return self.async_create_entry(title="", data={})
 
         return self.async_show_form(
             step_id="init",
-            data_schema=_host_schema(current_host, current_interval),
+            data_schema=_host_schema(
+                current_host, current_interval, current_power_factor, current_invert_power
+            ),
             errors=errors,
         )
