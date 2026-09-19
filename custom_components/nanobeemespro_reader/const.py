@@ -3,6 +3,8 @@
 DOMAIN = "nanobeemespro_reader"
 DEFAULT_SCAN_INTERVAL = 5  # seconds
 DEFAULT_HOST = ""
+DEFAULT_POWER_FACTOR = 1.0  # no multiplication by default
+DEFAULT_INVERT_POWER = False  # don't invert power by default
 
 EMETER_ENDPOINT = "/emeter.json"
 
@@ -58,3 +60,6 @@ OBIS_SENSORS = {
         "icon": "mdi:lightning-bolt",
     },
 }
+
+# OBIS codes that are energy values (will be multiplied by power_factor)
+ENERGY_OBIS_CODES = {"1.8.0", "1.8.1", "1.8.2", "2.8.0", "2.8.1", "2.8.2"}
