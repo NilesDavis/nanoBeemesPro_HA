@@ -9,8 +9,9 @@ import aiohttp
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.const import CONF_HOST
 
-from .const import DOMAIN, EMETER_ENDPOINT
+from .const import DOMAIN, EMETER_ENDPOINT, ENERGY_OBIS_CODES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -19,15 +20,27 @@ _BACKOFF_INITIAL = 10       # seconds after first failure
 _BACKOFF_MAX = 300          # cap at 5 minutes
 _BACKOFF_MULTIPLIER = 2
 
+CONF_POWER_FACTOR = "power_factor"
+CONF_INVERT_POWER = "invert_power"
+
 
 class BsedLesekopfCoordinator(DataUpdateCoordinator):
     """Fetches data from the BSED nanoBeemesPro emeter.json endpoint."""
 
-    def __init__(self, hass: HomeAssistant, host: str, scan_interval: int) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        host: str,
+        scan_interval: int,
+        power_factor: float = 1.0,
+        invert_power: bool = False,
+    ) -> None:
         self.host = host
         self.url = f"http://{host}{EMETER_ENDPOINT}"
         self._session = aiohttp.ClientSession()
         self._scan_interval = scan_interval
+        self._power_factor = power_factor
+        self._invert_power = invert_power
         self._consecutive_failures = 0
         self._device_was_available = True  # tracks last known state for logging
 
@@ -58,11 +71,30 @@ class BsedLesekopfCoordinator(DataUpdateCoordinator):
         # Successful fetch — reset failure state
         self._on_success()
 
-        # Parse array of {descr, value} into a flat dict
+        # Parse array of {descr, value} into a flat dict with transformations
         parsed: dict[str, str] = {}
         for entry in raw["eminfo"]:
             descr = entry.get("descr", "")
             value = entry.get("value", "")
+            
+            # Apply power_factor to energy OBIS codes
+            if descr in ENERGY_OBIS_CODES:
+                try:
+                    numeric_value = float(value)
+                    numeric_value *= self._power_factor
+                    value = str(numeric_value)
+                except (ValueError, TypeError):
+                    pass
+            
+            # Apply invert_power to 16.7.0 (current power)
+            if descr == "16.7.0" and self._invert_power:
+                try:
+                    numeric_value = float(value)
+                    numeric_value *= -1
+                    value = str(numeric_value)
+                except (ValueError, TypeError):
+                    pass
+            
             parsed[descr] = value
 
         parsed["__emstatus"] = str(raw.get("emstatus", ""))
