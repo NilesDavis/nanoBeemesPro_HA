@@ -1,7 +1,7 @@
 {
   "domain": "nanobeemespro_reader",
   "name": "nanoBeemesPro Reader",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "homeassistant": "2026.5.0",
   "documentation": "https://github.com/NilesDavis/nanoBeemesPro_HA",
   "codeowners": ["@NilesDavis"],
