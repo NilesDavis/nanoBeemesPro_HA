@@ -5,7 +5,9 @@
         "title": "nanoBeemesPro Reader einrichten",
         "data": {
           "host": "IP-Adresse oder Hostname des Lesekopfs",
-          "scan_interval": "Abfrageintervall (Sekunden)"
+          "scan_interval": "Abfrageintervall (Sekunden)",
+          "power_factor": "Wandler-Faktor für Energiewerte (Standard: 1.0)",
+          "invert_power": "Leistung negieren (16.7.0 invertieren)"
         }
       }
     },
@@ -23,7 +25,9 @@
         "title": "nanoBeemesPro Reader konfigurieren",
         "data": {
           "host": "IP-Adresse oder Hostname des Lesekopfs",
-          "scan_interval": "Abfrageintervall (Sekunden)"
+          "scan_interval": "Abfrageintervall (Sekunden)",
+          "power_factor": "Wandler-Faktor für Energiewerte (Standard: 1.0)",
+          "invert_power": "Leistung negieren (16.7.0 invertieren)"
         }
       }
     },
