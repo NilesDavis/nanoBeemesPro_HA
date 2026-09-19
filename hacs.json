@@ -1,7 +1,7 @@
 {
   "name": "nanoBeemesPro Reader",
   "homeassistant": "2026.5.0",
-  "hacs": "2.0.5"
+  "hacs": "2.0.5",
   "render_readme": true,
   "filename": "custom_components/nanobeemespro_reader/manifest.json"
 }
