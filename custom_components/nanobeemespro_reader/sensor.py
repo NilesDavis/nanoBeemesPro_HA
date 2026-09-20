@@ -47,7 +47,7 @@ async def async_setup_entry(
                 BsedSensor(coordinator, entry, obis_key, meta, is_raw=False)
             )
         else:
-            # Power sensors: just one, with optional inversion
+            # Power sensor 16.7.0: just one, with power_factor applied + optional inversion
             entities.append(
                 BsedSensor(coordinator, entry, obis_key, meta, is_raw=False)
             )
@@ -124,12 +124,11 @@ class BsedSensor(CoordinatorEntity, SensorEntity):
         
         # Apply transformations only to non-raw sensors
         if not self._is_raw:
-            # Apply power_factor to energy values
-            if self._obis_key in ENERGY_OBIS_CODES:
-                power_factor = self._entry.data.get("power_factor", 1.0)
-                value *= power_factor
+            # Apply power_factor to ALL measured values (energy + power)
+            power_factor = self._entry.data.get("power_factor", 1.0)
+            value *= power_factor
             
-            # Apply invert_power to 16.7.0 (power)
+            # Apply invert_power to 16.7.0 (current power) AFTER scaling
             if self._obis_key == "16.7.0":
                 invert_power = self._entry.data.get("invert_power", False)
                 if invert_power:
