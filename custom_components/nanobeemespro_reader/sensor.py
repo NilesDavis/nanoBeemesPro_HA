@@ -15,10 +15,13 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, OBIS_SENSORS
+from .const import DOMAIN, OBIS_SENSORS, ENERGY_OBIS_CODES
 from .coordinator import BsedLesekopfCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+CONF_POWER_FACTOR = "power_factor"
+CONF_INVERT_POWER = "invert_power"
 
 
 async def async_setup_entry(
@@ -30,8 +33,24 @@ async def async_setup_entry(
     coordinator: BsedLesekopfCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     entities = []
+    
+    # Create sensors for each OBIS code
     for obis_key, meta in OBIS_SENSORS.items():
-        entities.append(BsedSensor(coordinator, entry, obis_key, meta))
+        # For energy values: create BOTH raw and scaled sensors
+        if obis_key in ENERGY_OBIS_CODES:
+            # Raw sensor (no scaling)
+            entities.append(
+                BsedSensor(coordinator, entry, obis_key, meta, is_raw=True)
+            )
+            # Scaled sensor (with power_factor)
+            entities.append(
+                BsedSensor(coordinator, entry, obis_key, meta, is_raw=False)
+            )
+        else:
+            # Power sensors: just one, with optional inversion
+            entities.append(
+                BsedSensor(coordinator, entry, obis_key, meta, is_raw=False)
+            )
 
     # Always add Zählernummer as a diagnostic sensor
     entities.append(BsedZaehlerSensor(coordinator, entry))
@@ -48,19 +67,28 @@ class BsedSensor(CoordinatorEntity, SensorEntity):
         entry: ConfigEntry,
         obis_key: str,
         meta: dict,
+        is_raw: bool = False,
     ) -> None:
         super().__init__(coordinator)
         self._obis_key = obis_key
         self._meta = meta
         self._entry = entry
+        self._is_raw = is_raw
         host = entry.data[CONF_HOST]
 
-        # Entity ID based on OBIS code (e.g., "1.8.0" → "1_8_0")
+        # Entity ID based on OBIS code
         obis_id = obis_key.replace(".", "_")
-        self._attr_unique_id = f"{host}_{obis_id}"
+        if is_raw:
+            self._attr_unique_id = f"{host}_{obis_id}_raw"
+        else:
+            self._attr_unique_id = f"{host}_{obis_id}"
         
-        # Friendly name from OBIS_SENSORS metadata
-        self._attr_name = f"{obis_key} - {meta['name']}"
+        # Friendly name: show if it's raw or scaled
+        if is_raw:
+            self._attr_name = f"{obis_key} - {meta['name']} (Rohdaten)"
+        else:
+            self._attr_name = f"{obis_key} - {meta['name']}"
+        
         self._attr_native_unit_of_measurement = meta["unit"]
         self._attr_icon = meta["icon"]
 
@@ -83,14 +111,31 @@ class BsedSensor(CoordinatorEntity, SensorEntity):
         """Return the current sensor value."""
         if self.coordinator.data is None:
             return None
+        
         raw = self.coordinator.data.get(self._obis_key)
         if raw is None:
             return None
+        
         try:
-            return float(raw)
+            value = float(raw)
         except (ValueError, TypeError):
             _LOGGER.warning("Cannot convert '%s' to float for %s", raw, self._obis_key)
             return None
+        
+        # Apply transformations only to non-raw sensors
+        if not self._is_raw:
+            # Apply power_factor to energy values
+            if self._obis_key in ENERGY_OBIS_CODES:
+                power_factor = self._entry.data.get("power_factor", 1.0)
+                value *= power_factor
+            
+            # Apply invert_power to 16.7.0 (power)
+            if self._obis_key == "16.7.0":
+                invert_power = self._entry.data.get("invert_power", False)
+                if invert_power:
+                    value *= -1
+        
+        return value
 
     @property
     def available(self) -> bool:
