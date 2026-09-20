@@ -1,12 +1,17 @@
 """nanoBeemesPro Reader integration."""
 from __future__ import annotations
 
+import logging
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_SCAN_INTERVAL, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_registry import async_get as async_get_entity_registry
 
-from .const import DOMAIN, DEFAULT_SCAN_INTERVAL
+from .const import DOMAIN, DEFAULT_SCAN_INTERVAL, OBIS_SENSORS
 from .coordinator import BsedLesekopfCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 CONF_POWER_FACTOR = "power_factor"
 CONF_INVERT_POWER = "invert_power"
@@ -21,6 +26,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     power_factor = entry.data.get(CONF_POWER_FACTOR, 1.0)
     invert_power = entry.data.get(CONF_INVERT_POWER, False)
 
+    # Cleanup old entities from previous versions
+    await _async_migrate_old_entities(hass, entry)
+
     coordinator = BsedLesekopfCoordinator(
         hass, host, scan_interval, power_factor, invert_power
     )
@@ -34,6 +42,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     return True
+
+
+async def _async_migrate_old_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove old entity IDs that are no longer needed."""
+    entity_registry = async_get_entity_registry(hass)
+    host = entry.data[CONF_HOST]
+    
+    # List of old OBIS codes to remove (versions < 1.2.0)
+    # These are the entity IDs created BEFORE we had _raw sensors
+    old_entity_ids_to_remove = []
+    
+    # Build list of old entity_ids that should be removed
+    for obis_key in OBIS_SENSORS.keys():
+        obis_id = obis_key.replace(".", "_")
+        # Old unique_id format (without _raw, without scaling distinction)
+        old_unique_id = f"{host}_{obis_id}"
+        
+        # Try to find and remove the old entity
+        for entity in entity_registry.entities.values():
+            if entity.unique_id == old_unique_id and entity.domain == "sensor":
+                old_entity_ids_to_remove.append(entity.entity_id)
+    
+    # Remove old entities
+    if old_entity_ids_to_remove:
+        _LOGGER.info(
+            "Removing old entities from previous integration version: %s",
+            old_entity_ids_to_remove,
+        )
+        for entity_id in old_entity_ids_to_remove:
+            entity_registry.async_remove(entity_id)
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
