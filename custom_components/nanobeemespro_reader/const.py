@@ -61,5 +61,5 @@ OBIS_SENSORS = {
     },
 }
 
-# OBIS codes that are energy values (will be multiplied by power_factor)
+# OBIS codes that are energy values (werden als Raw + Skaliert bereitgestellt)
 ENERGY_OBIS_CODES = {"1.8.0", "1.8.1", "1.8.2", "2.8.0", "2.8.1", "2.8.2"}
