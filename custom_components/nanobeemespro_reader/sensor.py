@@ -36,21 +36,15 @@ async def async_setup_entry(
     
     # Create sensors for each OBIS code
     for obis_key, meta in OBIS_SENSORS.items():
-        # For energy values: create BOTH raw and scaled sensors
-        if obis_key in ENERGY_OBIS_CODES:
-            # Raw sensor (no scaling)
-            entities.append(
-                BsedSensor(coordinator, entry, obis_key, meta, is_raw=True)
-            )
-            # Scaled sensor (with power_factor)
-            entities.append(
-                BsedSensor(coordinator, entry, obis_key, meta, is_raw=False)
-            )
-        else:
-            # Power sensor 16.7.0: just one, with power_factor applied + optional inversion
-            entities.append(
-                BsedSensor(coordinator, entry, obis_key, meta, is_raw=False)
-            )
+        # For ALL values (energy + power): create BOTH raw and scaled sensors
+        # Raw sensor (no scaling)
+        entities.append(
+            BsedSensor(coordinator, entry, obis_key, meta, is_raw=True)
+        )
+        # Scaled sensor (with power_factor)
+        entities.append(
+            BsedSensor(coordinator, entry, obis_key, meta, is_raw=False)
+        )
 
     # Always add Zählernummer as a diagnostic sensor
     entities.append(BsedZaehlerSensor(coordinator, entry))
