@@ -8,6 +8,22 @@ DEFAULT_INVERT_POWER = False  # don't invert power by default
 
 EMETER_ENDPOINT = "/emeter.json"
 
+# --- Delta-Schätzung & Messquellen-Status (v1.3) ----------------------------
+# Schlüssel, unter dem die Delta-Schätzung im geparsten dict des Coordinators liegt.
+POWER_ESTIMATE_KEY = "power_estimate"
+
+# Quellen (Gesamt-Zählerstände) für die Delta-Leistungsschätzung.
+POWER_DELTA_OBIS_SOURCES = ("1.8.0", "2.8.0")
+
+# Hysterese-Schwellen für den Messquellen-Status (Anzahl aufeinanderfolgender Polls)
+STATUS_OK_NEEDED = 3     # 16.7.0 gültig n-in-Folge -> Status 'on'
+STATUS_MISS_NEEDED = 5   # 16.7.0 fehlt n-in-Folge -> Status 'off'
+
+# Minimale Energieänderung (Wh), ab der eine Schätzung als signifikant gilt.
+# Zählerstand hat 3 Nachkommastellen -> ~1 Wh Auflösung; darunter ist das Delta Rauschen.
+EST_MIN_DELTA_WH = 1.0
+# -----------------------------------------------------------------------------
+
 # Mapping: descr-Wert aus JSON → (sensor_name, unit, device_class, state_class)
 OBIS_SENSORS = {
     "1.8.0": {

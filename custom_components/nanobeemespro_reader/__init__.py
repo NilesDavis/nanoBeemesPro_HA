@@ -18,6 +18,23 @@ CONF_INVERT_POWER = "invert_power"
 
 PLATFORMS = [Platform.SENSOR]
 
+# Suffixe der Zusatz-Sensoren (ohne Host-Präfix), die der aktuelle Code erzeugt.
+# Werden für die Cleanup-Migration als "gültig" betrachtet.
+_EXTRA_SENSOR_SUFFIXES = ("power_estimate", "power_effective", "measurement_source")
+
+
+def _current_unique_ids(host: str) -> set[str]:
+    """Alle unique_ids, die sensor.py aktuell für einen Host erzeugt."""
+    ids = set()
+    for obis_key in OBIS_SENSORS:
+        obis_id = obis_key.replace(".", "_")
+        ids.add(f"{host}_{obis_id}")
+        ids.add(f"{host}_{obis_id}_raw")
+    ids.add(f"{host}_zaehler_nr")
+    for suffix in _EXTRA_SENSOR_SUFFIXES:
+        ids.add(f"{host}_{suffix}")
+    return ids
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up nanoBeemesPro Reader from a config entry."""
@@ -26,8 +43,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     power_factor = entry.data.get(CONF_POWER_FACTOR, 1.0)
     invert_power = entry.data.get(CONF_INVERT_POWER, False)
 
-    # Cleanup old entities from previous versions
-    await _async_migrate_old_entities(hass, entry)
+    # Cleanup old/verwaiste Entities aus vorherigen Versionen
+    await _async_migrate_old_entities(hass, entry, host)
 
     coordinator = BsedLesekopfCoordinator(
         hass, host, scan_interval, power_factor, invert_power
@@ -44,33 +61,42 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def _async_migrate_old_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove old entity IDs that are no longer needed."""
+async def _async_migrate_old_entities(
+    hass: HomeAssistant, entry: ConfigEntry, host: str
+) -> None:
+    """Entfernt Sensor-Entities dieses Hosts, die der aktuelle Code NICHT (mehr) erzeugt.
+
+    Abgedeckt werden:
+      - Altlasten mit OLD Punkt-Format (z.B. `10.0.3.90_1.8.0` statt `_1_8_0`),
+        die aus Versionen <1.2.0 als verwaiste `unavailable`-Reste stehen blieben.
+      - Entities, die von einer früheren Version erzeugt wurden und heute keine
+        Entsprechung mehr in sensor.py haben.
+
+    Bewusst NICHT gelöscht werden die aktuell erzeugten Sensoren (inkl. der
+    berechneten `{host}_{obis_id}` Variante) — die frühere Migration entfernte
+    fälschlich auch die eigene nicht-Roh-Entity (destruktiver Bug).
+    """
     entity_registry = async_get_entity_registry(hass)
-    host = entry.data[CONF_HOST]
-    
-    # List of old OBIS codes to remove (versions < 1.2.0)
-    # These are the entity IDs created BEFORE we had _raw sensors
-    old_entity_ids_to_remove = []
-    
-    # Build list of old entity_ids that should be removed
-    for obis_key in OBIS_SENSORS.keys():
-        obis_id = obis_key.replace(".", "_")
-        # Old unique_id format (without _raw, without scaling distinction)
-        old_unique_id = f"{host}_{obis_id}"
-        
-        # Try to find and remove the old entity
-        for entity in entity_registry.entities.values():
-            if entity.unique_id == old_unique_id and entity.domain == "sensor":
-                old_entity_ids_to_remove.append(entity.entity_id)
-    
-    # Remove old entities
-    if old_entity_ids_to_remove:
+    valid = _current_unique_ids(host)
+
+    to_remove = []
+    for entity in entity_registry.entities.values():
+        if entity.domain != "sensor":
+            continue
+        uid = entity.unique_id or ""
+        # Nur Entities dieses Geräts (Host-Präfix) behandeln
+        if not uid.startswith(f"{host}_"):
+            continue
+        if uid not in valid:
+            to_remove.append((entity.entity_id, uid))
+
+    if to_remove:
         _LOGGER.info(
-            "Removing old entities from previous integration version: %s",
-            old_entity_ids_to_remove,
+            "nanoBeemesPro (%s): remove old/stale entities: %s",
+            host,
+            [f"{eid} ({uid})" for eid, uid in to_remove],
         )
-        for entity_id in old_entity_ids_to_remove:
+        for entity_id, _ in to_remove:
             entity_registry.async_remove(entity_id)
 
 
