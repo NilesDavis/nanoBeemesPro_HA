@@ -22,6 +22,11 @@ PLATFORMS = [Platform.SENSOR]
 # Werden für die Cleanup-Migration als "gültig" betrachtet.
 _EXTRA_SENSOR_SUFFIXES = ("power_estimate", "power_effective", "measurement_source")
 
+# v1.4: Richtungs-Sensoren (Einspeisung/Entnahme) — eigene unique_id-Formate,
+# die _EXTRA_SENSOR_SUFFIXES nicht abdeckt (OBIS-Block + separater Block).
+_R2L_EFFECTIVE_SUFFIXES = ("power_import_effective", "power_export_effective")
+_R2L_RAW_SUFFIXES = ("16_7_0_import_raw", "16_7_0_export_raw")
+
 
 def _current_unique_ids(host: str) -> set[str]:
     """Alle unique_ids, die sensor.py aktuell für einen Host erzeugt."""
@@ -32,6 +37,8 @@ def _current_unique_ids(host: str) -> set[str]:
         ids.add(f"{host}_{obis_id}_raw")
     ids.add(f"{host}_zaehler_nr")
     for suffix in _EXTRA_SENSOR_SUFFIXES:
+        ids.add(f"{host}_{suffix}")
+    for suffix in _R2L_EFFECTIVE_SUFFIXES + _R2L_RAW_SUFFIXES:
         ids.add(f"{host}_{suffix}")
     return ids
 

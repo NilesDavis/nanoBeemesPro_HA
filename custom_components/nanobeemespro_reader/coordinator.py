@@ -162,6 +162,47 @@ class BsedLesekopfCoordinator(DataUpdateCoordinator):
         """Letzte Delta-Schätzung in W (None = noch kein brauchbares Delta)."""
         return self._est_power
 
+    @property
+    def power_effective(self) -> float | None:
+        """'Always-usable' Wirkleistung (mit Vorzeichen) in W.
+
+        Echter 16.7.0 (mit power_factor/invert skaliert) wenn Messquelle 'on',
+        sonst die Delta-Schätzung. Gleiche Semantik wie der gleichnamige Sensor —
+        hier zentral, damit mehrere Sensoren dieselbe Quelle nutzen.
+        """
+        if self.data is None:
+            return None
+        if self._status == "on":
+            real16 = self.data.get("16.7.0")
+            if real16 not in (None, ""):
+                try:
+                    value = float(real16)
+                except (ValueError, TypeError):
+                    pass
+                else:
+                    value *= self._power_factor
+                    if self._invert_power:
+                        value *= -1
+                    return value
+        # sonst Delta-Schätzung (bereits echte W, kein power_factor anwenden)
+        return self._est_power
+
+    @property
+    def power_import(self) -> float | None:
+        """Entnahme (Bezug) in W, immer >= 0. Aus dem effektiven Vorzeichen-Wert."""
+        eff = self.power_effective
+        if eff is None:
+            return None
+        return max(0.0, eff)
+
+    @property
+    def power_export(self) -> float | None:
+        """Einspeisung in W, immer >= 0. Aus dem effektiven Vorzeichen-Wert."""
+        eff = self.power_effective
+        if eff is None:
+            return None
+        return max(0.0, -eff)
+
     def _handle_failure(self, reason: object) -> None:
         """Track consecutive failures, log on first occurrence, apply backoff."""
         self._consecutive_failures += 1

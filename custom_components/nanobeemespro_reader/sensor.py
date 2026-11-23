@@ -54,6 +54,14 @@ async def async_setup_entry(
     # "Always-usable": echter Wert wenn 'on', sonst Schätzung (Anzeige)
     entities.append(BsedPowerEffectiveSensor(coordinator, entry))
 
+    # --- Richtungs-Sensoren (v1.4): Einspeisung / Entnahme ---
+    # Effektivwerte (mit Schätz-Fallback, funktionieren auch am EMH)
+    entities.append(BsedPowerDirectionEffectiveSensor(coordinator, entry, is_import=True))
+    entities.append(BsedPowerDirectionEffectiveSensor(coordinator, entry, is_import=False))
+    # Rohdaten (echter 16.7.0, ohne power_factor; bleiben am EMH 'unknown')
+    entities.append(BsedPowerDirectionRawSensor(coordinator, entry, is_import=True))
+    entities.append(BsedPowerDirectionRawSensor(coordinator, entry, is_import=False))
+
     # Always add Zählernummer as a diagnostic sensor
     entities.append(BsedZaehlerSensor(coordinator, entry))
 
@@ -238,23 +246,7 @@ class BsedPowerEffectiveSensor(_BaseExtraSensor):
 
     @property
     def native_value(self) -> float | None:
-        if self.coordinator.data is None:
-            return None
-        # echte 16.7.0 (mit gleicher Skalierung wie der echte Sensor) wenn Status 'on'
-        if self.coordinator.measurement_source == "on":
-            raw = self.coordinator.data.get("16.7.0")
-            if raw not in (None, ""):
-                try:
-                    value = float(raw)
-                    pf = self._entry.data.get("power_factor", 1.0)
-                    value *= pf
-                    if self._entry.data.get("invert_power", False):
-                        value *= -1
-                    return value
-                except (ValueError, TypeError):
-                    pass
-        # sonst Delta-Schätzung (bereits echte W, kein power_factor anwenden)
-        return self.coordinator.power_estimate
+        return self.coordinator.power_effective
 
     @property
     def extra_state_attributes(self) -> dict | None:
@@ -263,6 +255,123 @@ class BsedPowerEffectiveSensor(_BaseExtraSensor):
     @property
     def available(self) -> bool:
         return self.coordinator.last_update_success and self.coordinator.data is not None
+
+
+class _BsedDirectionSensor(_BaseExtraSensor):
+    """Basis für die Richtungs-Sensoren (Einspeisung vs. Entnahme, je >= 0).
+
+    Beide Richtungen werden aus dem gleichen Vorzeichen-Wirkleistungssignal
+    gesplittet: Entnahme = max(0, P), Einspeisung = max(0, -P).
+    """
+
+    _DEVICE_CLASS = SensorDeviceClass.POWER
+    _STATE_CLASS = SensorStateClass.MEASUREMENT
+    _UNIT = "W"
+    _ICON = "mdi:transmission-tower"
+
+    def __init__(
+        self,
+        coordinator: BsedLesekopfCoordinator,
+        entry: ConfigEntry,
+        is_import: bool,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._is_import = is_import
+        self._attr_native_unit_of_measurement = self._UNIT
+        self._attr_device_class = self._DEVICE_CLASS
+        self._attr_state_class = self._STATE_CLASS
+        self._attr_icon = self._ICON
+
+    @property
+    def _direction(self) -> float | None:
+        """Liefert den Richtungswert (>= 0) oder None."""
+        raise NotImplementedError
+
+    @property
+    def native_value(self) -> float | None:
+        return self._direction
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.last_update_success and self.coordinator.data is not None
+
+
+class BsedPowerDirectionEffectiveSensor(_BsedDirectionSensor):
+    """Effektivwert der Einspeisung / Entnahme in W (immer >= 0).
+
+    Quelle: der effektive Vorzeichen-Wirkleistungswert (echter 16.7.0 wenn
+    Messquelle 'on', sonst Delta-Schätzung) — funktioniert damit auch am EMH,
+    der 16.7.0 nicht liefert.
+    """
+
+    def __init__(
+        self,
+        coordinator: BsedLesekopfCoordinator,
+        entry: ConfigEntry,
+        is_import: bool,
+    ) -> None:
+        super().__init__(coordinator, entry, is_import)
+        suffix = "import" if is_import else "export"
+        self._attr_unique_id = f"{self._host}_power_{suffix}_effective"
+        self._attr_name = "Entnahme (effektiv)" if is_import else "Einspeisung (effektiv)"
+        if is_import:
+            self._attr_icon = "mdi:transmission-tower-import"
+        else:
+            self._attr_icon = "mdi:transmission-tower-export"
+
+    @property
+    def _direction(self) -> float | None:
+        eff = self.coordinator.power_effective
+        if eff is None:
+            return None
+        return max(0.0, eff) if self._is_import else max(0.0, -eff)
+
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        return {"used_source": self.coordinator.measurement_source}
+
+
+class BsedPowerDirectionRawSensor(_BsedDirectionSensor):
+    """Rohdaten der Einspeisung / Entnahme: Split aus dem rohen echten
+    16.7.0-Wert (OHNE power_factor-Skalierung).
+
+    Konsistent zum bestehenden `_raw`-Sensor: bleibt `unknown`, wenn der Zähler
+    ​​16.7.0 nicht liefert (z.B. EMH in Eppertshausen, emstatus:1).
+    """
+
+    def __init__(
+        self,
+        coordinator: BsedLesekopfCoordinator,
+        entry: ConfigEntry,
+        is_import: bool,
+    ) -> None:
+        super().__init__(coordinator, entry, is_import)
+        suffix = "import" if is_import else "export"
+        self._attr_unique_id = f"{self._host}_16_7_0_{suffix}_raw"
+        self._attr_name = (
+            "16.7.0 - Entnahme (Rohdaten)" if is_import else "16.7.0 - Einspeisung (Rohdaten)"
+        )
+        if is_import:
+            self._attr_icon = "mdi:transmission-tower-import"
+        else:
+            self._attr_icon = "mdi:transmission-tower-export"
+
+    @property
+    def _direction(self) -> float | None:
+        if self.coordinator.data is None:
+            return None
+        raw = self.coordinator.data.get("16.7.0")
+        if raw in (None, ""):
+            return None
+        try:
+            value = float(raw)
+        except (ValueError, TypeError):
+            return None
+        return max(0.0, value) if self._is_import else max(0.0, -value)
+
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        return {"source": "real_16.7.0_raw", "scaled": False}
 
 
 class BsedZaehlerSensor(CoordinatorEntity, SensorEntity):

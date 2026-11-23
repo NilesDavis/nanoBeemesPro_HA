@@ -9,6 +9,10 @@ Liest Daten lokal über `http://<IP>/emeter.json` – kein Cloud-Abo erforderlic
 | Sensor | OBIS | Einheit |
 |---|---|---|
 | Aktuelle Wirkleistung | 16.7.0 | W |
+| Einspeisung (effektiv) | – | W |
+| Entnahme (effektiv) | – | W |
+| 16.7.0 - Einspeisung (Rohdaten) | 16.7.0 | W |
+| 16.7.0 - Entnahme (Rohdaten) | 16.7.0 | W |
 | Wirkenergie Bezug gesamt | 1.8.0 | kWh |
 | Wirkenergie Bezug Tarif 1 | 1.8.1 | kWh |
 | Wirkenergie Bezug Tarif 2 | 1.8.2 | kWh |
@@ -18,6 +22,18 @@ Liest Daten lokal über `http://<IP>/emeter.json` – kein Cloud-Abo erforderlic
 | Zählernummer | – | – |
 
 Die Leistung (16.7.0) ist negativ bei Einspeisung (PV-Überschuss).
+
+### Richtungs-Sensoren (Einspeisung / Entnahme)
+
+Ab Version 1.4.0 werden aus der Wirkleistung zusätzlich zwei getrennte Richtungs-Sensoren
+abgeleitet (jeweils ≥ 0 W):
+
+- **Einspeisung** und **Entnahme (effektiv):** Die effektive Wirkleistung (echter 16.7.0
+  wenn verfügbar, sonst Delta-Schätzung aus 1.8.0/2.8.0) wird in die beiden Richtungen
+  aufgeteilt. Damit funktionieren diese Sensoren auch an Zählern, die 16.7.0 nicht liefern
+  (z.B. EMH mit `emstatus:1`).
+- **16.7.0 - Einspeisung/Entnahme (Rohdaten):** Split aus dem rohen 16.7.0-Zählerwert
+  (ohne `power_factor`-Skalierung). Bleiben `unknown`, wenn der Zähler 16.7.0 nicht liefert.
 
 ## Installation
 
