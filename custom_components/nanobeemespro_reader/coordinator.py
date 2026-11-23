@@ -119,9 +119,18 @@ class BsedLesekopfCoordinator(DataUpdateCoordinator):
         die Zählerstände haben 3 Nachkommastellen (~1 Wh Auflösung); darunter
         wäre das Delta Rauschen.
         """
+        # Fehlende Zählerstände (z.B. emstatus:1-reduzierter Datensatz) dürfen
+        # NICHT als 0.0 interpretiert werden: das Delta zum nächsten gültigen
+        # Stand würde die komplette Summe als "Verbrauch in einem Poll" werten
+        # (Explosion auf Mrd-Werte). Bei unvollständigen Daten KEINE Schätzung
+        # aktualisieren — der letzte gültige Wert bleibt stehen.
+        bezug_raw = parsed.get(POWER_DELTA_OBIS_SOURCES[0])
+        einsp_raw = parsed.get(POWER_DELTA_OBIS_SOURCES[1])
+        if bezug_raw is None or bezug_raw == "" or einsp_raw is None or einsp_raw == "":
+            return
         try:
-            bezug = float(parsed.get(POWER_DELTA_OBIS_SOURCES[0]) or 0.0)
-            einsp = float(parsed.get(POWER_DELTA_OBIS_SOURCES[1]) or 0.0)
+            bezug = float(bezug_raw)
+            einsp = float(einsp_raw)
         except (ValueError, TypeError):
             return
         now = time.time()
